@@ -73,7 +73,7 @@ To change the research query and customize the report, edit the `task.json` file
 #### For example:
 ```json
 {
-  "query": "Is AI in a hype cycle?",
+  "query": "Provide expert researcg on Battele Healthcare division, including info on patents, technology commercialization",
   "model": "gpt-4o",
   "max_sections": 3, 
   "publish_formats": { 
