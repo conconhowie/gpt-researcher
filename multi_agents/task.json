@@ -1,6 +1,6 @@
 {
-  "query": "Concert.AI capabilites around Medical Imaging and Whole Slide Images, and clinical and pharma value chain",
-  "max_sections": 5,
+  "query": "How was the mayo clinic platform built and what legal requirements and agreements where used",
+  "max_sections": 3,
   "publish_formats": {
     "markdown": true,
     "pdf": true,
@@ -9,10 +9,9 @@
   "follow_guidelines": true,
   "model": "gpt-4o",
   "guidelines": [
-    "The report MUST be written in APA format",
     "Each sub section MUST include supporting sources using hyperlinks. If none exist, erase the sub section or rewrite it to be a part of the previous section",
     "Accuracy is important",
-    "Bulleted format is preferred"
+    "Use High Quality Sources"
   ],
   "verbose": true
 }
