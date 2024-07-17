@@ -19,7 +19,7 @@ class GPTResearcher:
         query: str,
         report_type: str = ReportType.ResearchReport.value,
         report_source=ReportSource.Web.value,
-        tone=Tone.Objective.value,
+        tone: Tone = Tone.Objective,
         source_urls=None,
         documents=None,
         config_path=None,
@@ -31,6 +31,7 @@ class GPTResearcher:
         visited_urls: set = set(),
         verbose: bool = True,
         context=[],
+        headers: dict = None,  # Add headers parameter
     ):
         """
         Initialize the GPT Researcher class.
@@ -47,10 +48,10 @@ class GPTResearcher:
             subtopics: list
             visited_urls: set
         """
+        self.headers = headers or {}
         self.query: str = query
         self.agent: str = agent
         self.role: str = role
-        self.tone: Tone = tone
         self.report_type: str = report_type
         self.report_prompt: str = get_prompt_by_report_type(
             self.report_type
@@ -58,14 +59,25 @@ class GPTResearcher:
         self.report_source: str = report_source
         self.research_costs: float = 0.0
         self.cfg = Config(config_path)
-        self.retriever = get_retriever(self.cfg.retriever)
+        self.retriever = get_retriever(self.headers.get("retriever")) or get_retriever(
+            self.cfg.retriever
+        )
         self.context = context
         self.source_urls = source_urls
         self.documents = documents
-        self.memory = Memory(self.cfg.embedding_provider)
+        self.memory = Memory(self.cfg.embedding_provider, self.headers)
         self.visited_urls: set[str] = visited_urls
         self.verbose: bool = verbose
         self.websocket = websocket
+        self.headers = headers or {}
+        # Ensure tone is an instance of Tone enum
+        if isinstance(tone, dict):
+            print(f"Invalid tone format: {tone}. Setting to default Tone.Objective.")
+            self.tone = Tone.Objective
+        elif isinstance(tone, str):
+            self.tone = Tone[tone]
+        else:
+            self.tone = tone
 
         # Only relevant for DETAILED REPORTS
         # --------------------------------------
@@ -87,6 +99,7 @@ class GPTResearcher:
         if self.verbose:
             await stream_output(
                 "logs",
+                "starting_research",
                 f"🔎 Starting the research task for '{self.query}'...",
                 self.websocket,
             )
@@ -98,10 +111,11 @@ class GPTResearcher:
                 cfg=self.cfg,
                 parent_query=self.parent_query,
                 cost_callback=self.add_costs,
+                headers=self.headers,
             )
 
         if self.verbose:
-            await stream_output("logs", self.agent, self.websocket)
+            await stream_output("logs", "agent_generated", self.agent, self.websocket)
 
         # If specified, the researcher will use the given urls as the context for the research.
         if self.source_urls:
@@ -127,6 +141,7 @@ class GPTResearcher:
         if self.verbose:
             await stream_output(
                 "logs",
+                "research_step_finalized",
                 f"Finalized research step.\n💸 Total Research Costs: ${self.get_costs()}",
                 self.websocket,
             )
@@ -145,6 +160,7 @@ class GPTResearcher:
         if self.verbose:
             await stream_output(
                 "logs",
+                "task_summary_coming_up",
                 f"✍️ Writing summary for research task: {self.query}...",
                 self.websocket,
             )
@@ -160,6 +176,7 @@ class GPTResearcher:
                 tone=self.tone,
                 websocket=self.websocket,
                 cfg=self.cfg,
+                headers=self.headers,
             )
         elif self.report_type == "subtopic_report":
             report = await generate_report(
@@ -174,6 +191,7 @@ class GPTResearcher:
                 main_topic=self.parent_query,
                 existing_headers=existing_headers,
                 cost_callback=self.add_costs,
+                headers=self.headers,
             )
         else:
             report = await generate_report(
@@ -186,6 +204,7 @@ class GPTResearcher:
                 websocket=self.websocket,
                 cfg=self.cfg,
                 cost_callback=self.add_costs,
+                headers=self.headers,
             )
 
         return report
@@ -198,9 +217,11 @@ class GPTResearcher:
         if self.verbose:
             await stream_output(
                 "logs",
-                f"🧠 I will conduct my research based on the following urls: {new_search_urls}...",
+                "source_urls",
+                f"🗂️ I will conduct my research based on the following urls: {new_search_urls}...",
                 self.websocket,
             )
+
         scraped_sites = scrape_urls(new_search_urls, self.cfg)
         return await self.__get_similar_content_by_query(self.query, scraped_sites)
 
@@ -219,6 +240,7 @@ class GPTResearcher:
             parent_query=self.parent_query,
             report_type=self.report_type,
             cost_callback=self.add_costs,
+            openai_api_key=self.headers.get("openai_api_key"),
         )
 
         # If this is not part of a sub researcher, add original query to research for better results
@@ -228,8 +250,11 @@ class GPTResearcher:
         if self.verbose:
             await stream_output(
                 "logs",
-                f"🧠 I will conduct my research based on the following queries: {sub_queries}...",
+                "subqueries",
+                f"🗂️ I will conduct my research based on the following queries: {sub_queries}...",
                 self.websocket,
+                True,
+                sub_queries,
             )
 
         # Using asyncio.gather to process the sub_queries asynchronously
@@ -253,7 +278,10 @@ class GPTResearcher:
         """
         if self.verbose:
             await stream_output(
-                "logs", f"\n🔎 Running research for '{sub_query}'...", self.websocket
+                "logs",
+                "running_subquery_research",
+                f"\n🔍 Running research for '{sub_query}'...",
+                self.websocket,
             )
 
         if not scraped_data:
@@ -262,10 +290,15 @@ class GPTResearcher:
         content = await self.__get_similar_content_by_query(sub_query, scraped_data)
 
         if content and self.verbose:
-            await stream_output("logs", f"📃 {content}", self.websocket)
+            await stream_output(
+                "logs", "subquery_context_window", f"📃 {content}", self.websocket
+            )
         elif self.verbose:
             await stream_output(
-                "logs", f"🤷 No content found for '{sub_query}'...", self.websocket
+                "logs",
+                "subquery_context_not_found",
+                f"🤷 No content found for '{sub_query}'...",
+                self.websocket,
             )
         return content
 
@@ -283,8 +316,11 @@ class GPTResearcher:
                 if self.verbose:
                     await stream_output(
                         "logs",
+                        "added_source_url",
                         f"✅ Added source url to research: {url}\n",
                         self.websocket,
+                        True,
+                        url,
                     )
 
         return new_urls
@@ -299,9 +335,9 @@ class GPTResearcher:
             Summary
         """
         # Get Urls
-        retriever = self.retriever(sub_query)
-        search_results = retriever.search(
-            max_results=self.cfg.max_search_results_per_query
+        retriever = self.retriever(sub_query, headers=self.headers)
+        search_results = await asyncio.to_thread(
+            retriever.search, max_results=self.cfg.max_search_results_per_query
         )
         new_search_urls = await self.__get_new_urls(
             [url.get("href") for url in search_results]
@@ -310,18 +346,24 @@ class GPTResearcher:
         # Scrape Urls
         if self.verbose:
             await stream_output(
-                "logs", f"🤔 Researching for relevant information...\n", self.websocket
+                "logs",
+                "researching",
+                f"🤔 Researching for relevant information...\n",
+                self.websocket,
             )
 
         # Scrape Urls
-        scraped_content_results = scrape_urls(new_search_urls, self.cfg)
+        scraped_content_results = await asyncio.to_thread(
+            scrape_urls, new_search_urls, self.cfg
+        )
         return scraped_content_results
 
     async def __get_similar_content_by_query(self, query, pages):
         if self.verbose:
             await stream_output(
                 "logs",
-                f"📝 Getting relevant content based on query: {query}...",
+                "fetching_query_content",
+                f"📚 Getting relevant content based on query: {query}...",
                 self.websocket,
             )
 
@@ -330,7 +372,7 @@ class GPTResearcher:
             documents=pages, embeddings=self.memory.get_embeddings()
         )
         # Run Tasks
-        return context_compressor.get_context(
+        return await context_compressor.async_get_context(
             query=query, max_results=8, cost_callback=self.add_costs
         )
 
@@ -380,7 +422,12 @@ class GPTResearcher:
         `construct_subtopics` function.
         """
         if self.verbose:
-            await stream_output("logs", f"🤔 Generating subtopics...", self.websocket)
+            await stream_output(
+                "logs",
+                "generating_subtopics",
+                f"🤔 Generating subtopics...",
+                self.websocket,
+            )
 
         subtopics = await construct_subtopics(
             task=self.query,
@@ -391,6 +438,8 @@ class GPTResearcher:
         )
 
         if self.verbose:
-            await stream_output("logs", f"📋Subtopics: {subtopics}", self.websocket)
+            await stream_output(
+                "logs", "subtopics", f"📋Subtopics: {subtopics}", self.websocket
+            )
 
         return subtopics
