@@ -30,7 +30,7 @@ async def write_text_to_md(text: str, filename: str = "") -> str:
     """
     file_path = f"outputs/{filename[:60]}.md"
     await write_to_file(file_path, text)
-    return file_path
+    return urllib.parse.quote(file_path)
 
 async def write_md_to_pdf(text: str, filename: str = "") -> str:
     """Converts Markdown text to a PDF file and returns the file path.
@@ -50,7 +50,7 @@ async def write_md_to_pdf(text: str, filename: str = "") -> str:
                # md_file_path=f"{file_path}.md",
                css_file_path="./frontend/pdf_styles.css",
                base_url=None)
-        print(f"Report written to {file_path}.pdf")
+        print(f"Report written to {file_path}")
     except Exception as e:
         print(f"Error in converting Markdown to PDF: {e}")
         return ""
